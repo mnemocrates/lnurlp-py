@@ -176,14 +176,17 @@ Or create `/etc/systemd/system/lnurlp.service` manually with the included templa
 Restart=always
 RestartSec=10
 
-# Security hardening
+#### Security hardening
+```
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/lnurlp-py
+```
 
-# Logging
+#### Logging
+```
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lnurlp
