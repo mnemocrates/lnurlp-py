@@ -305,7 +305,6 @@ def check_rate_limit(ip_address):
                 'count': 1,
                 'reset_time': current_time + RATE_LIMIT_WINDOW
             }
-            save_rate_limits()  # Persist changes
             return True
         
         ip_data = rate_limit_store[ip_address]
@@ -316,7 +315,6 @@ def check_rate_limit(ip_address):
                 'count': 1,
                 'reset_time': current_time + RATE_LIMIT_WINDOW
             }
-            save_rate_limits()  # Persist changes
             return True
         
         # Check limit
@@ -325,7 +323,6 @@ def check_rate_limit(ip_address):
         
         # Increment counter
         ip_data['count'] += 1
-        save_rate_limits()  # Persist changes
         return True
 
 def increment_stat(stat_name):
@@ -608,17 +605,18 @@ if __name__ == "__main__":
     else:
         logger.info("Username whitelist: disabled (all usernames accepted)")
     logger.info(f"Health check available at: http://{SERVER_HOST}:{SERVER_PORT}/health")
-    logger.info(f"Statistics will be saved every {STATS_SAVE_INTERVAL} seconds to {STATS_FILE}")
+    logger.info(f"Stats and rate limits will be saved every {STATS_SAVE_INTERVAL} seconds")
     
-    # Start periodic stats saving in background
+    # Start periodic stats and rate limit saving in background
     import threading
-    def periodic_stats_save():
+    def periodic_save():
         while True:
             time.sleep(STATS_SAVE_INTERVAL)
             save_stats()
+            save_rate_limits()
     
-    stats_thread = threading.Thread(target=periodic_stats_save, daemon=True)
-    stats_thread.start()
+    save_thread = threading.Thread(target=periodic_save, daemon=True)
+    save_thread.start()
     
     try:
         server = HTTPServer((SERVER_HOST, SERVER_PORT), Handler)
