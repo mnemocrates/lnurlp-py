@@ -338,6 +338,78 @@ def increment_stat(stat_name):
     with stats_lock:
         stats[stat_name] = stats.get(stat_name, 0) + 1
 
+def check_directory_permissions():
+    """Verify that the server can write to required directories and files"""
+    errors = []
+    
+    # Check directories that need write access
+    directories_to_check = []
+    files_to_check = []
+    
+    # Add log file directory if configured
+    if LOG_FILE:
+        log_dir = os.path.dirname(LOG_FILE)
+        if log_dir:
+            directories_to_check.append(("log directory", log_dir))
+            files_to_check.append(("log file", LOG_FILE))
+    
+    # Add stats file directory
+    if STATS_FILE:
+        stats_dir = os.path.dirname(STATS_FILE)
+        if stats_dir:
+            directories_to_check.append(("stats directory", stats_dir))
+            files_to_check.append(("stats file", STATS_FILE))
+    
+    # Add rate limit file directory
+    if RATE_LIMIT_FILE:
+        rate_limit_dir = os.path.dirname(RATE_LIMIT_FILE)
+        if rate_limit_dir:
+            directories_to_check.append(("rate limit directory", rate_limit_dir))
+            files_to_check.append(("rate limit file", RATE_LIMIT_FILE))
+    
+    # Check if directories exist and are writable
+    for name, directory in directories_to_check:
+        if not directory:
+            continue
+            
+        if not os.path.exists(directory):
+            errors.append(f"{name} does not exist: {directory}")
+            continue
+            
+        if not os.path.isdir(directory):
+            errors.append(f"{name} is not a directory: {directory}")
+            continue
+            
+        if not os.access(directory, os.W_OK):
+            errors.append(f"No write permission for {name}: {directory}")
+    
+    # Try to write test files to verify actual write capability
+    for name, filepath in files_to_check:
+        if not filepath or errors:  # Skip if we already found directory errors
+            continue
+            
+        # Try to create/update the file
+        try:
+            # If file exists, try to open it in append mode
+            # If it doesn't exist, try to create it
+            test_mode = 'a' if os.path.exists(filepath) else 'w'
+            with open(filepath, test_mode) as f:
+                pass  # Just test that we can open it
+            
+            # If we created a new file during the test, ensure proper permissions
+            if test_mode == 'w' and os.path.exists(filepath):
+                # Set readable by owner and group
+                os.chmod(filepath, 0o644)
+                
+        except PermissionError as e:
+            errors.append(f"Cannot write to {name}: {filepath} - {e}")
+        except OSError as e:
+            errors.append(f"Cannot access {name}: {filepath} - {e}")
+        except Exception as e:
+            errors.append(f"Error testing {name}: {filepath} - {e}")
+    
+    return errors
+
 class Handler(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
@@ -379,10 +451,15 @@ class Handler(BaseHTTPRequestHandler):
                 if stats['start_time']:
                     uptime = (datetime.now() - stats['start_time']).total_seconds()
                 
+                # Create a copy of stats with datetime converted to timestamp
+                stats_copy = stats.copy()
+                if 'start_time' in stats_copy and stats_copy['start_time']:
+                    stats_copy['start_time'] = stats_copy['start_time'].isoformat()
+                
                 health_data = {
                     "status": "healthy",
                     "uptime_seconds": uptime,
-                    "stats": stats.copy()
+                    "stats": stats_copy
                 }
                 logger.debug(f"[{self.request_id}] Health check requested")
                 self.respond(health_data)
@@ -590,6 +667,28 @@ if __name__ == "__main__":
     if not load_macaroon():
         logger.error("Failed to load macaroon, exiting")
         sys.exit(1)
+    
+    # Check directory permissions before starting server
+    permission_errors = check_directory_permissions()
+    if permission_errors:
+        logger.error("Directory permission check failed:")
+        for error in permission_errors:
+            logger.error(f"  - {error}")
+        logger.error("")
+        logger.error("Fix permissions with these commands:")
+        if STATS_FILE or RATE_LIMIT_FILE:
+            data_dir = os.path.dirname(STATS_FILE or RATE_LIMIT_FILE)
+            if data_dir:
+                logger.error(f"  sudo chown $(whoami):$(whoami) {data_dir}")
+                logger.error(f"  sudo chmod 755 {data_dir}")
+        if LOG_FILE:
+            log_dir = os.path.dirname(LOG_FILE)
+            if log_dir:
+                logger.error(f"  sudo chown $(whoami):$(whoami) {log_dir}")
+                logger.error(f"  sudo chmod 755 {log_dir}")
+        sys.exit(1)
+    
+    logger.info("Directory permissions verified successfully")
     
     # Load persisted data
     load_rate_limits()

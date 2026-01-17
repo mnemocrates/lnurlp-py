@@ -25,7 +25,26 @@ A lightweight, self-hosted LNURL-pay server implementation in Python that connec
 
 ## Installation
 
-### 1. Create System User and Directories
+### Step 1: Install System Dependencies
+
+```bash
+# Update package list
+sudo apt update
+
+# Install Python 3 and pip
+sudo apt install python3 python3-pip
+
+# Install Tor (if not already installed)
+sudo apt install tor
+
+# Install nginx (for reverse proxy)
+sudo apt install nginx
+
+# Install certbot (for SSL certificates)
+sudo apt install certbot python3-certbot-nginx
+```
+
+### Step 2: Create System User and Directories
 
 Create a dedicated user and directory structure following Linux FHS standards:
 
@@ -33,25 +52,17 @@ Create a dedicated user and directory structure following Linux FHS standards:
 # Create lnurlp user (no login shell, system user)
 sudo useradd -r -s /bin/false lnurlp
 
-# Create application directory
+# Create application directory (root owns the code)
 sudo mkdir -p /opt/lnurlp-py
 
-# Create runtime directories
-sudo mkdir -p /var/log/lnurlp
+# Create runtime data directory (lnurlp user owns runtime data)
 sudo mkdir -p /var/lib/lnurlp
 
-# Set ownership
-sudo chown -R root:root /opt/lnurlp-py
-sudo chown lnurlp:lnurlp /var/log/lnurlp
-sudo chown lnurlp:lnurlp /var/lib/lnurlp
-
-# Set permissions
-sudo chmod 755 /opt/lnurlp-py
-sudo chmod 755 /var/log/lnurlp
-sudo chmod 755 /var/lib/lnurlp
+# Create log directory (lnurlp user owns logs)
+sudo mkdir -p /var/log/lnurlp
 ```
 
-### 2. Install Application Files
+### Step 3: Install Application Files
 
 ```bash
 # Clone repository to application directory
@@ -59,75 +70,221 @@ cd /opt
 sudo git clone <your-repo-url> lnurlp-py
 cd lnurlp-py
 
-# Set file permissions (root owns code, read-only)
-sudo chmod 644 /opt/lnurlp-py/*.py
-sudo chmod 644 /opt/lnurlp-py/*.md
-sudo chmod 644 /opt/lnurlp-py/LICENSE
+# Set ownership - root owns application code (read-only for security)
+sudo chown -R root:root /opt/lnurlp-py
+
+# Make server.py executable
+sudo chmod 755 /opt/lnurlp-py/server.py
 ```
 
-### 3. Install Python Dependencies
+### Step 4: Install Python Dependencies
 
 ```bash
-sudo pip install -r requirements.txt
-# Or for user install:
-pip install --user requests
+# Install required Python packages
+sudo pip3 install requests
+
+# Or use requirements.txt if available:
+# sudo pip3 install -r requirements.txt
 ```
 
-### 4. Configure the Server
+### Step 5: Configure the Server
 
 ```bash
-# Copy and edit configuration
+# Copy configuration template
+cd /opt/lnurlp-py
 sudo cp config.json.example config.json
+
+# Edit configuration (see Configuration section below for details)
 sudo nano config.json
 
-# Set config permissions (readable by lnurlp group)
-sudo chown root:lnurlp config.json
-sudo chmod 640 config.json
+# IMPORTANT: Update these values in config.json:
+#   - lnd.onion_address: Your LND node's onion address
+#   - lnurlp.domain: Your public domain name
+#   - lnd.macaroon_path: /var/lib/lnurlp/invoice.macaroon
+#   - server.rate_limit_file: /var/lib/lnurlp/rate_limits.json
+#   - server.stats_file: /var/lib/lnurlp/stats.json
+#   - server.log_file: /var/log/lnurlp/lnurlp-server.log
+
+# Set config permissions (readable by lnurlp user)
+sudo chown root:lnurlp /opt/lnurlp-py/config.json
+sudo chmod 640 /opt/lnurlp-py/config.json
 ```
 
-### 5. Install Macaroon
+### Step 6: Install Macaroon
 
 ```bash
 # Copy invoice macaroon from your LND node
-sudo cp /path/to/invoice.macaroon /var/lib/lnurlp/invoice.macaroon
+# Example: If LND is local
+sudo cp ~/.lnd/data/chain/bitcoin/mainnet/invoice.macaroon /var/lib/lnurlp/
 
-# Set restrictive permissions
+# Example: If copying from remote server
+# scp user@lnd-server:~/.lnd/data/chain/bitcoin/mainnet/invoice.macaroon .
+# sudo mv invoice.macaroon /var/lib/lnurlp/
+
+# Set restrictive permissions (CRITICAL for security)
 sudo chown lnurlp:lnurlp /var/lib/lnurlp/invoice.macaroon
 sudo chmod 600 /var/lib/lnurlp/invoice.macaroon
 ```
 
-### 6. Test the Installation
+### Step 7: Set Directory Permissions
+
+This is **critical** - incorrect permissions will cause the server fail:
 
 ```bash
-# Run verification script
+# lnurlp user must own runtime data and log directories
+sudo chown lnurlp:lnurlp /var/lib/lnurlp
+sudo chown lnurlp:lnurlp /var/log/lnurlp
+
+# Set directory permissions (755 allows lnurlp user to write files)
+sudo chmod 755 /var/lib/lnurlp
+sudo chmod 755 /var/log/lnurlp
+
+# Verify permissions are correct
+ls -ld /opt/lnurlp-py /var/lib/lnurlp /var/log/lnurlp
+# Should show:
+#   drwxr-xr-x ... root   root   ... /opt/lnurlp-py
+#   drwxr-xr-x ... lnurlp lnurlp ... /var/lib/lnurlp
+#   drwxr-xr-x ... lnurlp lnurlp ... /var/log/lnurlp
+```
+
+**Why these permissions matter:**
+- `/opt/lnurlp-py` - Root owns code (prevents server from modifying itself)
+- `/var/lib/lnurlp` - lnurlp user owns data (server can write rate_limits.json, stats.json)
+- `/var/log/lnurlp` - lnurlp user owns logs (server can write log files)
+- Wrong permissions = server unable to write data/logs.
+
+### Step 8: Test the Installation
+
+```bash
+# Test configuration validity
 cd /opt/lnurlp-py
 python3 verify_install.py
 
-# Test server manually (Ctrl+C to stop)
-sudo -u lnurlp python3 server.py
+# Test server manually (press Ctrl+C to stop)
+sudo -u lnurlp python3 /opt/lnurlp-py/server.py
+
+# In another terminal, test the endpoint
+curl http://127.0.0.1:5001/.well-known/lnurlp/test
 ```
 
-If you see "Server started successfully", the installation is correct!
+If you see:
+- "Server started successfully" in the first terminal
+- JSON response from curl (not hanging)
+- No permission errors in logs
+
+...then installation is correct! Press Ctrl+C to stop the test server.
 
 ### Directory Structure Summary
 
+After installation, your directory structure should look like this:
+
 ```
-/opt/lnurlp-py/              # Application code (root:root, 755)
-├── server.py                # Main server (644)
+/opt/lnurlp-py/              # Application code (root:root, read-only)
+├── server.py                # Main server (root:root, 755)
 ├── config.json              # Configuration (root:lnurlp, 640)
-├── config.json.example      # Template (644)
-└── ...
+├── config.json.example      # Template (root:root, 644)
+├── test_server.py           # Unit tests
+├── verify_install.py        # Installation verification
+├── lnurlp.service           # systemd service template
+└── README.md
 
 /var/lib/lnurlp/             # Runtime data (lnurlp:lnurlp, 755)
-├── invoice.macaroon         # LND auth (lnurlp:lnurlp, 600)
-├── rate_limits.json         # Created by server
-└── stats.json               # Created by server
+├── invoice.macaroon         # LND auth (lnurlp:lnurlp, 600) - YOU MUST COPY THIS
+├── rate_limits.json         # Auto-created by server (lnurlp:lnurlp, 644)
+└── stats.json               # Auto-created by server (lnurlp:lnurlp, 644)
 
 /var/log/lnurlp/             # Logs (lnurlp:lnurlp, 755)
-└── lnurlp-server.log        # Created by server
+└── lnurlp-server.log        # Auto-created by server (lnurlp:lnurlp, 644)
 ```
 
-## Configuration (config.json)
+**Ownership model:**
+- **root owns code** (`/opt/lnurlp-py`) - prevents the server from modifying its own code
+- **lnurlp owns data** (`/var/lib/lnurlp`) - allows the server to write persistent data
+- **lnurlp owns logs** (`/var/log/lnurlp`) - allows the server to write log files
+
+## systemd Service Setup
+
+After successful manual testing, set up the server to run automatically as a systemd service.
+
+### Step 1: Install Service File
+
+```bash
+# Copy the included service template
+sudo cp /opt/lnurlp-py/lnurlp.service /etc/systemd/system/
+
+# Reload systemd to recognize the new service
+sudo systemctl daemon-reload
+```
+
+The included `lnurlp.service` file has security hardening features:
+- Runs as non-root `lnurlp` user
+- Restricted filesystem access
+- Automatic restart on failure
+- Proper dependency ordering
+
+### Step 2: Enable and Start Service
+
+```bash
+# Enable service to start on boot
+sudo systemctl enable lnurlp
+
+# Start the service now
+sudo systemctl start lnurlp
+
+# Check service status
+sudo systemctl status lnurlp
+```
+
+### Step 3: Verify Service is Running
+
+```bash
+# View real-time logs
+sudo journalctl -u lnurlp -f
+
+# Test the endpoint
+curl http://127.0.0.1:5001/.well-known/lnurlp/test
+```
+
+### Step 4: Common Service Commands
+
+```bash
+# Stop the service
+sudo systemctl stop lnurlp
+
+# Restart the service (after config changes)
+sudo systemctl restart lnurlp
+
+# View service status
+sudo systemctl status lnurlp
+
+# View logs (last 50 lines)
+sudo journalctl -u lnurlp -n 50
+
+# View logs (follow in real-time)
+sudo journalctl -u lnurlp -f
+
+# Disable service (prevent auto-start on boot)
+sudo systemctl disable lnurlp
+```
+
+## nginx Configuration
+
+Configure nginx as a reverse proxy to handle HTTPS and route public traffic to your Python server.
+
+### Step 1: Obtain SSL Certificate
+
+```bash
+# Make sure your domain's DNS points to your server's IP address first!
+# Then obtain a free SSL certificate from Let's Encrypt:
+
+sudo certbot --nginx -d yourdomain.com
+
+# Follow the prompts to set up automatic certificate renewal
+```
+
+### Step 2: Create nginx Configuration
+
+Create `/etc/nginx/sites-available/lnurlp`:
 
 The server uses a JSON configuration file with the following structure:
 
@@ -188,9 +345,14 @@ The server uses a JSON configuration file with the following structure:
 
 **SSL Certificate Verification:**
 
-- For `.onion` addresses: Set `verify_ssl: false` (Tor provides encryption)
-- For clearnet addresses: Set `verify_ssl: true` and ensure proper certificates
-- **Warning**: Disabling SSL verification increases MITM risk on clearnet connections
+- For `.onion` addresses: `verify_ssl: false` is **safe** - Tor provides end-to-end encryption
+- For clearnet addresses: `verify_ssl: true` is **required** - HTTPS prevents MITM attacks
+- The server will log appropriate warnings based on your configuration
+
+**Important Notes:**
+- Disabling SSL verification on .onion is safe because Tor's architecture provides cryptographic authentication
+- The .onion address itself is derived from the service's public key, making MITM attacks cryptographically impossible
+- For clearnet LND nodes, always enable SSL verification with valid certificates
 
 **Finding your LND onion address:**
 ```bash
@@ -233,144 +395,121 @@ lncli getinfo | grep "uris"
 
 When enabled, only usernames in the `allowed_usernames` list will be accepted. Matching is case-insensitive (e.g., `Alice` = `alice`). All payments still go to your single LND wallet regardless of username.
 
-## systemd Service Setup
+## Configuration Reference (config.json)
 
-Create a systemd service file to run the server automatically. A template file `lnurlp.service` is included in the repository.
+The server uses a JSON configuration file with the following structure:
 
-### 1. Install Service File
-
-Copy the service file to systemd:
-
-```bash
-sudo cp lnurlp.service /etc/systemd/system/
-```
-
-Or create `/etc/systemd/system/lnurlp.service` manually with the included template.
-Restart=always
-RestartSec=10
-
-#### Security hardening
-```
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/lnurlp-py
-```
-
-#### Logging
-```
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=lnurlp
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 2. Create Service User
-
-```bash
-sudo useradd -r -s /bin/false lnurlp
-sudo chown -R lnurlp:lnurlp /opt/lnurlp-py
-```
-
-### 3. Enable and Start Service
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable lnurlp
-sudo systemctl start lnurlp
-```
-
-### 4. Check Status
-
-```bash
-sudo systemctl status lnurlp
-sudo journalctl -u lnurlp -f
-```
-
-## nginx Configuration
-
-Configure nginx as a reverse proxy to handle HTTPS and route requests to the Python server.
-
-### 1. Install Certbot (for SSL)
-
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.com
-```
-
-### 2. nginx Server Block
-
-Create `/etc/nginx/sites-available/lnurlp`:
-
-```nginx
-server {
-    listen 80;
-    listen [::]:80;
-    server_name yourdomain.com;
-    
-    # Redirect HTTP to HTTPS
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name yourdomain.com;
-
-    # SSL certificates (managed by certbot)
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    # LNURL-pay metadata endpoint
-    location /.well-known/lnurlp/ {
-        proxy_pass http://127.0.0.1:5001;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # CORS headers (optional, for web wallets)
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
-        add_header Access-Control-Allow-Headers "Content-Type";
-    }
-
-    # LNURL-pay callback endpoint
-    location /lnurlp/callback {
-        proxy_pass http://127.0.0.1:5001;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # CORS headers (optional, for web wallets)
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
-        add_header Access-Control-Allow-Headers "Content-Type";
-    }
-
-    # Block all other paths
-    location / {
-        return 404;
-    }
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5001,
+    "rate_limit_file": "/var/lib/lnurlp/rate_limits.json",
+    "stats_file": "/var/lib/lnurlp/stats.json",
+    "stats_save_interval": 300,
+    "log_file": "/var/log/lnurlp/lnurlp-server.log"
+  },
+  "lnd": {
+    "onion_address": "abcdefg1234567890.onion",
+    "port": 8080,
+    "macaroon_path": "/var/lib/lnurlp/invoice.macaroon",
+    "invoice_expiry": 3600,
+    "verify_ssl": false
+  },
+  "tor": {
+    "proxy": "socks5h://127.0.0.1:9050"
+  },
+  "lnurlp": {
+    "domain": "0kb.io",
+    "min_sendable": 1000,
+    "max_sendable": 100000000,
+    "comment_allowed": 200,
+    "allows_nostr": false,
+    "allowed_usernames": [],
+    "require_valid_username": false
+  }
 }
 ```
 
-### 3. Enable Site and Reload nginx
+### Configuration Parameters
 
+#### Server Settings
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `host` | string | IP address to bind the server (use `127.0.0.1` for local-only) |
+| `port` | integer | Port number for the HTTP server (default: 5001) |
+| `rate_limit_file` | string | Absolute path to rate limiting data file |
+| `stats_file` | string | Absolute path to server statistics file |
+| `stats_save_interval` | integer | How often to save stats in seconds (default: 300 = 5 minutes) |
+| `log_file` | string | Absolute path to log file |
+
+#### LND Settings
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `onion_address` | string | Your LND node's onion address (without `https://` or port) |
+| `port` | integer | LND REST API port (default: 8080) |
+| `macaroon_path` | string | Absolute path to invoice.macaroon file |
+| `invoice_expiry` | integer | Invoice expiry time in seconds (default: 3600 = 1 hour) |
+| `verify_ssl` | boolean | Enable SSL certificate verification (see below) |
+
+**SSL Certificate Verification:**
+
+- For `.onion` addresses: `verify_ssl: false` is **safe** - Tor provides end-to-end encryption
+- For clearnet addresses: `verify_ssl: true` is **required** - HTTPS prevents MITM attacks
+
+**Important Notes:**
+- Disabling SSL verification on .onion is safe because Tor's architecture provides cryptographic authentication
+- The .onion address itself is derived from the service's public key, making MITM attacks cryptographically impossible
+- For clearnet LND nodes, always enable SSL verification with valid certificates
+
+**Finding your LND onion address:**
 ```bash
-sudo ln -s /etc/nginx/sites-available/lnurlp /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+lncli getinfo | grep "uris"
 ```
+
+#### Tor Settings
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `proxy` | string | SOCKS5 proxy address for Tor (default: `socks5h://127.0.0.1:9050`) |
+
+#### LNURL-pay Settings
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `domain` | string | Your public domain name (e.g., `yourdomain.com`) |
+| `min_sendable` | integer | Minimum payment amount in millisatoshis (1000 = 1 sat) |
+| `max_sendable` | integer | Maximum payment amount in millisatoshis (100000000 = 100,000 sats) |
+| `comment_allowed` | integer | Maximum comment length in characters (0-280, default: 200) |
+| `allows_nostr` | boolean | Enable Nostr NIP-57 support (currently not implemented) |
+| `allowed_usernames` | array | Optional list of permitted usernames (empty = allow all) |
+| `require_valid_username` | boolean | Enforce username whitelist (requires `allowed_usernames` to be set) |
+
+**Important**: `max_sendable` values above 10 million sats (10,000,000,000 millisats) will trigger a warning during startup as they may expose your node to liquidity issues. Ensure your channels can handle the maximum amounts you configure.
+
+**Username Whitelist Examples:**
+
+**Allow any username** (default behavior):
+```json
+"allowed_usernames": [],
+"require_valid_username": false
+```
+
+**Restrict to specific usernames only:**
+```json
+"allowed_usernames": ["alice", "bob", "tips", "donations"],
+"require_valid_username": true
+```
+
+When enabled, only usernames in the `allowed_usernames` list will be accepted. Matching is case-insensitive (e.g., `Alice` = `alice`). All payments still go to your single LND wallet regardless of username.
 
 ## Usage
 
+### Lightning Address Format
+
+```
 ### Lightning Address Format
 
 Once configured, users can send payments to:
@@ -381,22 +520,9 @@ username@yourdomain.com
 
 **Important:** By default, ANY username will work and all payments go to your single LND wallet. The username only appears in the invoice memo field. 
 
-If you want to restrict which usernames are accepted, enable the username whitelist in your `config.json`:
+To restrict accepted usernames, enable the whitelist in your `config.json` (see Configuration Reference above).
 
-```json
-"allowed_usernames": ["alice", "bob", "tips"],
-"require_valid_username": true
-```
-
-With the whitelist enabled, only `alice@yourdomain.com`, `bob@yourdomain.com`, and `tips@yourdomain.com` will be accepted. Other usernames will return an error.
-
-For example, if your domain is `example.com` and a user wants to pay `alice`, they would use:
-
-```
-alice@example.com
-```
-
-### Testing the Endpoints
+### Testing Your Server
 
 **Test metadata endpoint:**
 ```bash
@@ -430,6 +556,8 @@ Expected response:
 }
 ```
 
+The `pr` field contains a Lightning invoice that can be paid by any Lightning wallet.
+
 ### Wallet Support
 
 Compatible with any LNURL-pay supporting wallet:
@@ -441,28 +569,50 @@ Compatible with any LNURL-pay supporting wallet:
 - Breez
 - And many more...
 
-## Monitoring
+Simply enter `username@yourdomain.com` in the wallet and it will handle the rest.
+
+## Monitoring and Maintenance
 
 ### View Live Logs
 
 ```bash
-# systemd logs
+# View systemd service logs (recommended)
 sudo journalctl -u lnurlp -f
 
-# Application logs
-tail -f /opt/lnurlp-py/lnurlp-server.log
+# View application log file
+tail -f /var/log/lnurlp/lnurlp-server.log
 ```
+
+### Check Server Statistics
+
+The server tracks statistics and saves them to `/var/lib/lnurlp/stats.json`:
+
+```bash
+# View current stats
+cat /var/lib/lnurlp/stats.json
+
+# Access health check endpoint
+curl http://127.0.0.1:5001/health
+```
+
+Statistics include:
+- Total requests
+- Metadata requests
+- Callback requests
+- Invoices created
+- Errors
+- Rate limit violations
 
 ### Log Rotation
 
-Configure logrotate for the application log:
+Configure logrotate to prevent log files from growing too large.
 
 Create `/etc/logrotate.d/lnurlp`:
 
 ```
-/opt/lnurlp-py/lnurlp-server.log {
+/var/log/lnurlp/lnurlp-server.log {
     daily
-    rotate 7
+    rotate 14
     compress
     delaycompress
     missingok
@@ -474,43 +624,116 @@ Create `/etc/logrotate.d/lnurlp`:
 }
 ```
 
+This will:
+- Rotate logs daily
+- Keep 14 days of logs
+- Compress old logs
+- Create new log files with correct ownership
+
 ## Troubleshooting
 
-### Server won't start
+### Server Won't Start
 
-**Check configuration:**
+### Server Won't Start
+
+**Check systemd status:**
 ```bash
-python3 verify_install.py  # Run installation verification first
-python3 server.py
+sudo systemctl status lnurlp
+sudo journalctl -u lnurlp -n 50
 ```
 
-**Verify config.json exists:**
+**Verify configuration:**
 ```bash
-ls -la config.json
+cd /opt/lnurlp-py
+python3 verify_install.py
 ```
 
-### LND connection fails
-
-**Test Tor connection:**
+**Check file permissions:**
 ```bash
-curl --socks5-hostname 127.0.0.1:9050 https://your-onion-address.onion:8080/v1/getinfo
+# Verify directories have correct ownership
+ls -ld /opt/lnurlp-py /var/lib/lnurlp /var/log/lnurlp
+
+# Verify macaroon permissions
+ls -l /var/lib/lnurlp/invoice.macaroon
 ```
 
-**Check macaroon permissions:**
+Common issues:
+- Missing `config.json` - copy from `config.json.example`
+- Wrong permissions on `/var/lib/lnurlp` or `/var/log/lnurlp`
+- Missing or wrong permissions on macaroon file
+
+### Server Hangs on Requests
+
+If `curl` connects but never returns a response:
+
+**Check permissions on data directories:**
 ```bash
-ls -la /path/to/invoice.macaroon
+# These must be owned by lnurlp user
+sudo chown lnurlp:lnurlp /var/lib/lnurlp
+sudo chown lnurlp:lnurlp /var/log/lnurlp
+
+# Restart after fixing permissions
+sudo systemctl restart lnurlp
 ```
 
-### Invoice creation fails
+**Check for permission errors in logs:**
+```bash
+sudo journalctl -u lnurlp | grep -i permission
+```
+
+The server will hang if it cannot write to:
+- `/var/log/lnurlp/lnurlp-server.log` (log file)
+- `/var/lib/lnurlp/rate_limits.json` (rate limiting data)
+- `/var/lib/lnurlp/stats.json` (statistics)
+
+### LND Connection Fails
+
+**Test Tor connectivity:**
+```bash
+# Test if you can reach your LND node via Tor
+curl --socks5-hostname 127.0.0.1:9050 \
+     https://your-onion-address.onion:8080/v1/getinfo \
+     --insecure
+```
+
+**Verify Tor is running:**
+```bash
+sudo systemctl status tor
+```
+
+**Check macaroon permissions and path:**
+```bash
+# Verify file exists and is readable by lnurlp user
+sudo -u lnurlp cat /var/lib/lnurlp/invoice.macaroon > /dev/null
+echo $?  # Should print 0 if successful
+```
+
+**Test macaroon manually:**
+```bash
+# Extract hex from macaroon
+MACAROON_HEX=$(xxd -p -c 1000 /var/lib/lnurlp/invoice.macaroon)
+
+# Test LND connection
+curl --socks5-hostname 127.0.0.1:9050 \
+     -H "Grpc-Metadata-macaroon: $MACAROON_HEX" \
+     https://your-onion.onion:8080/v1/getinfo \
+     --insecure
+```
+
+### Invoice Creation Fails
 
 **Check LND logs:**
 ```bash
+# For default LND installation
 tail -f ~/.lnd/logs/bitcoin/mainnet/lnd.log
 ```
 
-**Verify macaroon has invoice permissions:**
+**Verify macaroon permissions:**
+The macaroon must have `invoices:write` and `invoices:read` permissions.
+
+**Create a new invoice macaroon if needed:**
 ```bash
-lncli bakemacaroon invoices:write invoices:read
+lncli bakemacaroon invoices:write invoices:read --save_to=invoice.macaroon
 ```
 
 ### nginx 502 Bad Gateway
@@ -521,7 +744,33 @@ sudo systemctl status lnurlp
 curl http://127.0.0.1:5001/.well-known/lnurlp/test
 ```
 
-## SSL/TLS and Security Considerations
+**Check nginx error logs:**
+```bash
+sudo tail -f /var/log/nginx/error.log
+```
+
+**Verify nginx can connect to port 5001:**
+```bash
+sudo netstat -tlnp | grep 5001
+```
+
+### Rate Limiting Issues
+
+**Check current rate limit data:**
+```bash
+cat /var/lib/lnurlp/rate_limits.json
+```
+
+**Clear rate limits (if needed):**
+```bash
+sudo systemctl stop lnurlp
+sudo rm /var/lib/lnurlp/rate_limits.json
+sudo systemctl start lnurlp
+```
+
+Rate limits reset automatically after 60 seconds per IP address.
+
+## Security Considerations
 
 ### Tor Connection Security
 
@@ -672,17 +921,7 @@ If LND node is lost/corrupted:
 - Username history is not stored (server is stateless)
 - Invoice history is in LND's database only
 
-## Security Considerations
-
-1. **Keep macaroon secure** - Use an invoice-only macaroon with minimal permissions
-2. **Use HTTPS** - Always serve LNURL endpoints over HTTPS
-3. **Firewall** - Block direct access to port 5001, only allow nginx
-4. **Rate limiting** - Built-in at 100 req/60s per IP; add nginx rate limiting for defense-in-depth
-5. **fail2ban** - Optional fail2ban jail included to automatically ban abusive IPs
-6. **Monitor logs** - Regularly check logs for suspicious activity
-7. **Update regularly** - Keep dependencies and system packages updated
-
-### fail2ban Integration (Optional)
+## fail2ban Integration (Optional)
 
 Automatically ban IPs that repeatedly trigger rate limits or validation errors:
 
