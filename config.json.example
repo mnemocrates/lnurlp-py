@@ -1,0 +1,28 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5001,
+    "rate_limit_file": "rate_limits.json",
+    "stats_file": "stats.json",
+    "stats_save_interval": 300
+  },
+  "lnd": {
+    "onion_address": "abcdefg1234567890.onion",
+    "port": 8080,
+    "macaroon_path": "/var/lib/lnurlp/invoice.macaroon",
+    "invoice_expiry": 3600,
+    "verify_ssl": false
+  },
+  "tor": {
+    "proxy": "socks5h://127.0.0.1:9050"
+  },
+  "lnurlp": {
+    "domain": "0kb.io",
+    "min_sendable": 1000,
+    "max_sendable": 100000000,
+    "comment_allowed": 200,
+    "allows_nostr": false,
+    "allowed_usernames": [],
+    "require_valid_username": false
+  }
+}

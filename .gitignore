@@ -1,0 +1,6 @@
+config.json
+lnurlp-server.log
+__pycache__/
+*.pyc
+rate_limits.json
+stats.json

@@ -1,0 +1,31 @@
+[Unit]
+Description=LNURL-pay Server
+After=network.target tor.service
+Wants=tor.service
+
+[Service]
+Type=simple
+User=lnurlp
+Group=lnurlp
+WorkingDirectory=/opt/lnurlp-py
+ExecStart=/usr/bin/python3 /opt/lnurlp-py/server.py
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lnurlp-py
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lnurlp
+
+[Install]
+WantedBy=multi-user.target
