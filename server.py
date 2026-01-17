@@ -562,8 +562,18 @@ server = None
 def signal_handler(sig, frame):
     """Handle shutdown signals gracefully"""
     logger.info(f"Received signal {sig}, shutting down gracefully...")
-    if server:
-        server.shutdown()
+    # Save final state before shutdown
+    save_stats()
+    save_rate_limits()
+    # Call shutdown from a different thread to avoid deadlock
+    import threading
+    def shutdown_server():
+        if server:
+            server.shutdown()
+    shutdown_thread = threading.Thread(target=shutdown_server)
+    shutdown_thread.start()
+    shutdown_thread.join(timeout=5)
+    logger.info("Server shutdown complete")
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -620,9 +630,15 @@ if __name__ == "__main__":
         logger.error(f"Server error: {e}", exc_info=True)
         raise
     finally:
-        # Save final state before shutdown
-        save_stats()
-        save_rate_limits()
+        # Save final state before shutdown (if not already saved by signal handler)
+        try:
+            save_stats()
+            save_rate_limits()
+        except:
+            pass  # May have already been saved
         if server:
-            server.server_close()
-        logger.info("Server shutdown complete")
+            try:
+                server.server_close()
+            except:
+                pass
+        logger.info("Shutdown complete")
