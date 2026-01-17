@@ -482,15 +482,17 @@ class Handler(BaseHTTPRequestHandler):
                 callback = f"https://{DOMAIN}/lnurlp/callback"
 
                 body = {
-                    "status": "OK",
                     "tag": "payRequest",
                     "callback": callback,
                     "metadata": json.dumps([["text/plain", f"Payment to {username}@{DOMAIN}"]]),
                     "minSendable": MIN_SENDABLE,
                     "maxSendable": MAX_SENDABLE,
-                    "allowsNostr": ALLOWS_NOSTR,
                     "commentAllowed": COMMENT_ALLOWED
                 }
+                
+                # Only include allowsNostr if true (optional field)
+                if ALLOWS_NOSTR:
+                    body["allowsNostr"] = ALLOWS_NOSTR
 
                 logger.info(f"[{self.request_id}] LNURL metadata requested for user: {username}")
                 self.respond(body)
