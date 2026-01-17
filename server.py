@@ -533,11 +533,13 @@ class Handler(BaseHTTPRequestHandler):
     def respond(self, body):
         """Send successful JSON response"""
         try:
+            response_body = json.dumps(body).encode('utf-8')
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
-            self.wfile.write(json.dumps(body).encode('utf-8'))
+            self.wfile.write(response_body)
         except Exception as e:
             logger.error(f"[{self.request_id}] Error writing response: {e}")
     
@@ -545,11 +547,13 @@ class Handler(BaseHTTPRequestHandler):
         """Respond with LNURL error format"""
         try:
             body = {"status": "ERROR", "reason": reason}
+            response_body = json.dumps(body).encode('utf-8')
             self.send_response(200)  # LNURL errors still use 200 status
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
-            self.wfile.write(json.dumps(body).encode('utf-8'))
+            self.wfile.write(response_body)
         except Exception as e:
             logger.error(f"[{self.request_id}] Error writing error response: {e}")
 
