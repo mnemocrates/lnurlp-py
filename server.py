@@ -3,6 +3,7 @@ import json
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
+import urllib3
 import subprocess
 import os
 import logging
@@ -706,6 +707,8 @@ if __name__ == "__main__":
         if '.onion' in LND_ONION:
             logger.info("SSL certificate verification disabled for .onion address")
             logger.info("This is safe - Tor provides end-to-end encryption and authentication")
+            # Suppress urllib3 InsecureRequestWarning for .onion addresses
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         else:
             logger.warning("SSL certificate verification is DISABLED for clearnet LND connection!")
             logger.warning("This is UNSAFE and exposes you to MITM attacks!")
