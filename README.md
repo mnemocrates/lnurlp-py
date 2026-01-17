@@ -481,12 +481,14 @@ The server connects to LND via Tor onion service with `verify=False` for SSL cer
    - Restrict file permissions: `chmod 600 invoice.macaroon`
    - Rotate macaroons periodically
 
-### Rate Limiting (Critical)
+### Rate Limiting
 
-The server does NOT implement rate limiting itself. You **must** configure rate limiting in nginx to prevent abuse:
+The server implements built-in rate limiting (100 requests per 60 seconds per IP) with persistent storage to `rate_limits.json`. This provides basic protection against DoS attacks and invoice spam.
+
+**For additional protection**, configure rate limiting in nginx as well:
 
 ```nginx
-# Add to nginx server block
+# Add to nginx server block for defense-in-depth
 limit_req_zone $binary_remote_addr zone=lnurlp_meta:10m rate=30r/s;
 limit_req_zone $binary_remote_addr zone=lnurlp_callback:10m rate=10r/s;
 
@@ -503,7 +505,31 @@ location /lnurlp/callback {
 }
 ```
 
-Without rate limiting, your server is vulnerable to DoS attacks and invoice spam.
+The combination of application-level and nginx-level rate limiting provides defense-in-depth protection.
+
+### fail2ban for Automatic IP Banning
+
+While the server has built-in rate limiting, **fail2ban** provides an additional layer of protection by automatically banning IP addresses that exhibit abusive behavior. Unlike rate limiting which throttles requests, fail2ban uses iptables to completely block repeat offenders at the firewall level.
+
+**Why use fail2ban?**
+- **Persistent bans**: Blocks abusive IPs for extended periods (hours/days)
+- **System-wide protection**: Banned IPs are blocked from all services, not just the LNURL server
+- **Pattern detection**: Can identify attack patterns across multiple attempts
+- **Automatic response**: No manual intervention needed to block bad actors
+
+**How it works:**
+1. fail2ban monitors `lnurlp-server.log` for warning patterns
+2. Counts violations per IP address (rate limits, invalid requests, prohibited content)
+3. After threshold is reached (default: 5 violations in 10 minutes), bans the IP using iptables
+4. Ban duration is configurable (default: 1 hour)
+
+**When to use it:**
+- Production deployments exposed to the public internet
+- If you notice repeated abuse in your logs
+- When running on a server with other services (fail2ban can protect them too)
+- As part of a comprehensive security strategy
+
+The server works perfectly fine without fail2ban, but it's recommended for internet-facing deployments where automated attack mitigation is valuable.
 
 ## Backup and Recovery
 
@@ -578,9 +604,35 @@ If LND node is lost/corrupted:
 1. **Keep macaroon secure** - Use an invoice-only macaroon with minimal permissions
 2. **Use HTTPS** - Always serve LNURL endpoints over HTTPS
 3. **Firewall** - Block direct access to port 5001, only allow nginx
-4. **Rate limiting** - Consider adding nginx rate limiting to prevent abuse
-5. **Monitor logs** - Regularly check logs for suspicious activity
-6. **Update regularly** - Keep dependencies and system packages updated
+4. **Rate limiting** - Built-in at 100 req/60s per IP; add nginx rate limiting for defense-in-depth
+5. **fail2ban** - Optional fail2ban jail included to automatically ban abusive IPs
+6. **Monitor logs** - Regularly check logs for suspicious activity
+7. **Update regularly** - Keep dependencies and system packages updated
+
+### fail2ban Integration (Optional)
+
+Automatically ban IPs that repeatedly trigger rate limits or validation errors:
+
+1. Copy jail configuration:
+```bash
+sudo cp fail2ban-jail.conf /etc/fail2ban/jail.d/lnurlp.conf
+sudo cp fail2ban-filter.conf /etc/fail2ban/filter.d/lnurlp.conf
+```
+
+2. Update log path in `/etc/fail2ban/jail.d/lnurlp.conf` to match your installation
+
+3. Restart fail2ban:
+```bash
+sudo systemctl restart fail2ban
+sudo fail2ban-client status lnurlp
+```
+
+**Settings**:
+- `maxretry: 5` - Ban after 5 violations
+- `findtime: 600` - Within 10 minutes
+- `bantime: 3600` - Ban for 1 hour
+
+The filter catches rate limit violations, invalid usernames, prohibited content, and repeated errors.
 
 ## License
 
