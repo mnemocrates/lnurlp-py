@@ -22,12 +22,12 @@ class TestSanitization(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
-        # Mock the config-dependent global variables
-        global USERNAME_PATTERN, ALLOWED_USERNAMES, REQUIRE_VALID_USERNAME, COMMENT_BLACKLIST
-        USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+$')
-        ALLOWED_USERNAMES = []
-        REQUIRE_VALID_USERNAME = False
-        COMMENT_BLACKLIST = [
+        # Patch the server module's global variables
+        import server
+        server.USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+$')
+        server.ALLOWED_USERNAMES = []
+        server.REQUIRE_VALID_USERNAME = False
+        server.COMMENT_BLACKLIST = [
             r'https?://',
             r'www\.',
             r'@.*\.',
@@ -70,11 +70,11 @@ class TestSanitization(unittest.TestCase):
     
     def test_sanitize_username_whitelist(self):
         """Test username whitelist enforcement"""
+        import server
         from server import sanitize_username
-        global ALLOWED_USERNAMES, REQUIRE_VALID_USERNAME
         
-        ALLOWED_USERNAMES = ['alice', 'bob']
-        REQUIRE_VALID_USERNAME = True
+        server.ALLOWED_USERNAMES = ['alice', 'bob']
+        server.REQUIRE_VALID_USERNAME = True
         
         # Allowed usernames
         self.assertEqual(sanitize_username('alice'), 'alice')

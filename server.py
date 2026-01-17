@@ -87,43 +87,51 @@ def validate_config(cfg):
     errors = []
     
     # Validate server config
-    if not isinstance(cfg.get("server", {}).get("port"), int) or not (1 <= cfg["server"]["port"] <= 65535):
+    server_port = cfg.get("server", {}).get("port")
+    if not isinstance(server_port, int) or not (1 <= server_port <= 65535):
         errors.append("server.port must be an integer between 1 and 65535")
     
     # Validate LND config
-    if not isinstance(cfg.get("lnd", {}).get("port"), int) or not (1 <= cfg["lnd"]["port"] <= 65535):
+    lnd_port = cfg.get("lnd", {}).get("port")
+    if not isinstance(lnd_port, int) or not (1 <= lnd_port <= 65535):
         errors.append("lnd.port must be an integer between 1 and 65535")
     
     if not cfg.get("lnd", {}).get("onion_address"):
         errors.append("lnd.onion_address is required")
     
-    if not os.path.exists(cfg.get("lnd", {}).get("macaroon_path", "")):
-        errors.append(f"Macaroon file not found: {cfg.get('lnd', {}).get('macaroon_path')}")
+    macaroon_path = cfg.get("lnd", {}).get("macaroon_path", "")
+    if macaroon_path and not os.path.exists(macaroon_path):
+        errors.append(f"Macaroon file not found: {macaroon_path}")
     
     # Validate LNURL config
-    if not isinstance(cfg.get("lnurlp", {}).get("min_sendable"), int) or cfg["lnurlp"]["min_sendable"] < 1:
+    min_sendable = cfg.get("lnurlp", {}).get("min_sendable")
+    if not isinstance(min_sendable, int) or (isinstance(min_sendable, int) and min_sendable < 1):
         errors.append("lnurlp.min_sendable must be a positive integer")
     
-    if not isinstance(cfg.get("lnurlp", {}).get("max_sendable"), int) or cfg["lnurlp"]["max_sendable"] < 1:
+    max_sendable = cfg.get("lnurlp", {}).get("max_sendable")
+    if not isinstance(max_sendable, int) or (isinstance(max_sendable, int) and max_sendable < 1):
         errors.append("lnurlp.max_sendable must be a positive integer")
     
-    if cfg["lnurlp"]["min_sendable"] > cfg["lnurlp"]["max_sendable"]:
-        errors.append("lnurlp.min_sendable cannot be greater than max_sendable")
+    # Only check min/max relationship if both are valid integers
+    if isinstance(min_sendable, int) and isinstance(max_sendable, int):
+        if min_sendable > max_sendable:
+            errors.append("lnurlp.min_sendable cannot be greater than max_sendable")
     
     # Sanity check: warn about unusually high maximum amounts
     # 10 million sats = 10,000,000,000 millisats
     MAX_REASONABLE_AMOUNT = 10_000_000_000  # 10M sats in millisats
-    if cfg["lnurlp"]["max_sendable"] > MAX_REASONABLE_AMOUNT:
+    if isinstance(max_sendable, int) and max_sendable > MAX_REASONABLE_AMOUNT:
         # This is a warning, not an error - log it but don't fail validation
         import warnings
         warnings.warn(
-            f"max_sendable ({cfg['lnurlp']['max_sendable']} msat = {cfg['lnurlp']['max_sendable']//1000} sats) "
+            f"max_sendable ({max_sendable} msat = {max_sendable//1000} sats) "
             f"is very high. Recommended maximum: {MAX_REASONABLE_AMOUNT//1000} sats. "
             "This could expose your node to liquidity issues.",
             UserWarning
         )
     
-    if not isinstance(cfg.get("lnurlp", {}).get("comment_allowed"), int) or not (0 <= cfg["lnurlp"]["comment_allowed"] <= 2000):
+    comment_allowed = cfg.get("lnurlp", {}).get("comment_allowed")
+    if not isinstance(comment_allowed, int) or not (0 <= comment_allowed <= 2000):
         errors.append("lnurlp.comment_allowed must be an integer between 0 and 2000")
     
     if not cfg.get("lnurlp", {}).get("domain"):
@@ -596,9 +604,13 @@ if __name__ == "__main__":
     
     # Log SSL verification warning if disabled
     if not VERIFY_SSL:
-        logger.warning("SSL certificate verification is DISABLED for LND connections!")
-        logger.warning("This is acceptable for .onion addresses but increases MITM risk.")
-        logger.warning("For clearnet LND nodes, enable 'verify_ssl: true' in config.json")
+        if '.onion' in LND_ONION:
+            logger.info("SSL certificate verification disabled for .onion address")
+            logger.info("This is safe - Tor provides end-to-end encryption and authentication")
+        else:
+            logger.warning("SSL certificate verification is DISABLED for clearnet LND connection!")
+            logger.warning("This is UNSAFE and exposes you to MITM attacks!")
+            logger.warning("Enable 'verify_ssl: true' in config.json immediately")
     
     logger.info(f"Starting LNURL-pay server on {SERVER_HOST}:{SERVER_PORT}")
     logger.info(f"Domain: {DOMAIN}")
