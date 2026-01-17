@@ -25,35 +25,106 @@ A lightweight, self-hosted LNURL-pay server implementation in Python that connec
 
 ## Installation
 
-### 1. Clone or Download
+### 1. Create System User and Directories
+
+Create a dedicated user and directory structure following Linux FHS standards:
 
 ```bash
+# Create lnurlp user (no login shell, system user)
+sudo useradd -r -s /bin/false lnurlp
+
+# Create application directory
+sudo mkdir -p /opt/lnurlp-py
+
+# Create runtime directories
+sudo mkdir -p /var/log/lnurlp
+sudo mkdir -p /var/lib/lnurlp
+
+# Set ownership
+sudo chown -R root:root /opt/lnurlp-py
+sudo chown lnurlp:lnurlp /var/log/lnurlp
+sudo chown lnurlp:lnurlp /var/lib/lnurlp
+
+# Set permissions
+sudo chmod 755 /opt/lnurlp-py
+sudo chmod 755 /var/log/lnurlp
+sudo chmod 755 /var/lib/lnurlp
+```
+
+### 2. Install Application Files
+
+```bash
+# Clone repository to application directory
 cd /opt
-git clone <your-repo-url> lnurlp-py
+sudo git clone <your-repo-url> lnurlp-py
 cd lnurlp-py
+
+# Set file permissions (root owns code, read-only)
+sudo chmod 644 /opt/lnurlp-py/*.py
+sudo chmod 644 /opt/lnurlp-py/*.md
+sudo chmod 644 /opt/lnurlp-py/LICENSE
 ```
 
-### 2. Install Python Dependencies
+### 3. Install Python Dependencies
 
 ```bash
-pip install requests
+sudo pip install -r requirements.txt
+# Or for user install:
+pip install --user requests
 ```
 
-### 3. Configure the Server
-
-Copy the example configuration and edit it:
+### 4. Configure the Server
 
 ```bash
-cp config.json.example config.json
-nano config.json
+# Copy and edit configuration
+sudo cp config.json.example config.json
+sudo nano config.json
+
+# Set config permissions (readable by lnurlp group)
+sudo chown root:lnurlp config.json
+sudo chmod 640 config.json
 ```
 
-### 4. Set Permissions
-
-Ensure the macaroon file is readable:
+### 5. Install Macaroon
 
 ```bash
-chmod 644 /path/to/your/invoice.macaroon
+# Copy invoice macaroon from your LND node
+sudo cp /path/to/invoice.macaroon /var/lib/lnurlp/invoice.macaroon
+
+# Set restrictive permissions
+sudo chown lnurlp:lnurlp /var/lib/lnurlp/invoice.macaroon
+sudo chmod 600 /var/lib/lnurlp/invoice.macaroon
+```
+
+### 6. Test the Installation
+
+```bash
+# Run verification script
+cd /opt/lnurlp-py
+python3 verify_install.py
+
+# Test server manually (Ctrl+C to stop)
+sudo -u lnurlp python3 server.py
+```
+
+If you see "Server started successfully", the installation is correct!
+
+### Directory Structure Summary
+
+```
+/opt/lnurlp-py/              # Application code (root:root, 755)
+├── server.py                # Main server (644)
+├── config.json              # Configuration (root:lnurlp, 640)
+├── config.json.example      # Template (644)
+└── ...
+
+/var/lib/lnurlp/             # Runtime data (lnurlp:lnurlp, 755)
+├── invoice.macaroon         # LND auth (lnurlp:lnurlp, 600)
+├── rate_limits.json         # Created by server
+└── stats.json               # Created by server
+
+/var/log/lnurlp/             # Logs (lnurlp:lnurlp, 755)
+└── lnurlp-server.log        # Created by server
 ```
 
 ## Configuration (config.json)
@@ -65,9 +136,10 @@ The server uses a JSON configuration file with the following structure:
   "server": {
     "host": "127.0.0.1",
     "port": 5001,
-    "rate_limit_file": "rate_limits.json",
-    "stats_file": "stats.json",
-    "stats_save_interval": 300
+    "rate_limit_file": "/var/lib/lnurlp/rate_limits.json",
+    "stats_file": "/var/lib/lnurlp/stats.json",
+    "stats_save_interval": 300,
+    "log_file": "/var/log/lnurlp/lnurlp-server.log"
   },
   "lnd": {
     "onion_address": "abcdefg1234567890.onion",
@@ -99,9 +171,10 @@ The server uses a JSON configuration file with the following structure:
 |-----------|------|-------------|
 | `host` | string | IP address to bind the server (use `127.0.0.1` for local-only) |
 | `port` | integer | Port number for the HTTP server (default: 5001) |
-| `rate_limit_file` | string | File to persist rate limiting data (default: `rate_limits.json`) |
-| `stats_file` | string | File to persist server statistics (default: `stats.json`) |
+| `rate_limit_file` | string | Absolute path to rate limiting data file (e.g., `/var/lib/lnurlp/rate_limits.json`) |
+| `stats_file` | string | Absolute path to server statistics file (e.g., `/var/lib/lnurlp/stats.json`) |
 | `stats_save_interval` | integer | How often to save stats in seconds (default: 300 = 5 minutes) |
+| `log_file` | string | Absolute path to log file (e.g., `/var/log/lnurlp/lnurlp-server.log`) |
 
 #### LND Settings
 

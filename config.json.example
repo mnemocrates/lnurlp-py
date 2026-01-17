@@ -2,9 +2,10 @@
   "server": {
     "host": "127.0.0.1",
     "port": 5001,
-    "rate_limit_file": "rate_limits.json",
-    "stats_file": "stats.json",
-    "stats_save_interval": 300
+    "rate_limit_file": "/var/lib/lnurlp/rate_limits.json",
+    "stats_file": "/var/lib/lnurlp/stats.json",
+    "stats_save_interval": 300,
+    "log_file": "/var/log/lnurlp/lnurlp-server.log"
   },
   "lnd": {
     "onion_address": "abcdefg1234567890.onion",

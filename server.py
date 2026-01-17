@@ -14,12 +14,11 @@ from threading import Lock
 from datetime import datetime
 import time
 
-# Configure logging
+# Configure logging (will be reconfigured after loading config)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('lnurlp-server.log'),
         logging.StreamHandler()
     ]
 )
@@ -138,6 +137,19 @@ if validation_errors:
     for error in validation_errors:
         logger.error(f"  - {error}")
     sys.exit(1)
+
+# Configure file logging now that we have the config
+LOG_FILE = config["server"].get("log_file", "/var/log/lnurlp/lnurlp-server.log")
+try:
+    # Add file handler to existing logger
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    logger.info(f"Logging to {LOG_FILE}")
+except PermissionError:
+    logger.warning(f"Cannot write to {LOG_FILE}, using console logging only")
+except Exception as e:
+    logger.warning(f"Failed to configure file logging: {e}, using console logging only")
 
 # Initialize configuration variables
 LND_ONION = config["lnd"]["onion_address"]
