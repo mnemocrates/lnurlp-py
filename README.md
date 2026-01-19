@@ -309,7 +309,7 @@ The server uses a JSON configuration file with the following structure:
     "proxy": "socks5h://127.0.0.1:9050"
   },
   "lnurlp": {
-    "domain": "0kb.io",
+    "domain": "yourdomain.com",
     "min_sendable": 1000,
     "max_sendable": 100000000,
     "comment_allowed": 200,
