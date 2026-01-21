@@ -286,52 +286,58 @@ sudo certbot --nginx -d yourdomain.com
 
 Create `/etc/nginx/sites-available/lnurlp`:
 
-The server uses a JSON configuration file with the following structure:
+```nginx
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
 
-```json
-{
-  "server": {
-    "host": "127.0.0.1",
-    "port": 5001,
-    "rate_limit_file": "/var/lib/lnurlp/rate_limits.json",
-    "stats_file": "/var/lib/lnurlp/stats.json",
-    "stats_save_interval": 300,
-    "log_file": "/var/log/lnurlp/lnurlp-server.log"
-  },
-  "lnd": {
-    "onion_address": "abcdefg1234567890.onion",
-    "port": 8080,
-    "macaroon_path": "/var/lib/lnurlp/invoice.macaroon",
-    "invoice_expiry": 3600,
-    "verify_ssl": false
-  },
-  "tor": {
-    "proxy": "socks5h://127.0.0.1:9050"
-  },
-  "lnurlp": {
-    "domain": "yourdomain.com",
-    "min_sendable": 1000,
-    "max_sendable": 100000000,
-    "comment_allowed": 200,
-    "allows_nostr": false,
-    "allowed_usernames": [],
-    "require_valid_username": false
-  }
-}
+    server_name yourdomain.com;
+
+    root /var/www/lnurlp;
+    index index.html;
+
+    # No logs (or near-zero logs)
+    access_log off;
+    error_log /var/log/nginx/error.log crit;
+
+    # Security headers (minimal but useful)
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options DENY;
+    add_header X-XSS-Protection "1; mode=block";
+
+    # No directory listing
+    autoindex off;
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem; # managed by Certbot
+
+    # LNURL-pay metadata endpoint
+    location /.well-known/lnurlp/ {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS headers (optional, for web wallets)
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
+        add_header Access-Control-Allow-Headers "Content-Type";
+    }
+
+    # LNURL-pay callback endpoint
+    location /lnurlp/callback {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS headers (optional, for web wallets)
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
+        add_header Access-Control-Allow-Headers "Content-Type";
+    }
 ```
-
-### Configuration Parameters
-
-#### Server Settings
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `host` | string | IP address to bind the server (use `127.0.0.1` for local-only) |
-| `port` | integer | Port number for the HTTP server (default: 5001) |
-| `rate_limit_file` | string | Absolute path to rate limiting data file (e.g., `/var/lib/lnurlp/rate_limits.json`) |
-| `stats_file` | string | Absolute path to server statistics file (e.g., `/var/lib/lnurlp/stats.json`) |
-| `stats_save_interval` | integer | How often to save stats in seconds (default: 300 = 5 minutes) |
-| `log_file` | string | Absolute path to log file (e.g., `/var/log/lnurlp/lnurlp-server.log`) |
 
 #### LND Settings
 
@@ -364,36 +370,6 @@ lncli getinfo | grep "uris"
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `proxy` | string | SOCKS5 proxy address for Tor (default: `socks5h://127.0.0.1:9050`) |
-
-#### LNURL-pay Settings
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `domain` | string | Your public domain name (e.g., `yourdomain.com`) |
-| `min_sendable` | integer | Minimum payment amount in millisatoshis (1000 = 1 sat) |
-| `max_sendable` | integer | Maximum payment amount in millisatoshis (100000000 = 100,000 sats) |
-| `comment_allowed` | integer | Maximum comment length in characters (0-280, default: 200) |
-| `allows_nostr` | boolean | Enable Nostr NIP-57 support (currently not implemented) |
-| `allowed_usernames` | array | Optional list of permitted usernames (empty = allow all) |
-| `require_valid_username` | boolean | Enforce username whitelist (requires `allowed_usernames` to be set) |
-
-**Important**: `max_sendable` values above 10 million sats (10,000,000,000 millisats) will trigger a warning during startup as they may expose your node to liquidity issues. Ensure your channels can handle the maximum amounts you configure.
-
-**Username Whitelist Examples:**
-
-**Allow any username** (default behavior):
-```json
-"allowed_usernames": [],
-"require_valid_username": false
-```
-
-**Restrict to specific usernames only:**
-```json
-"allowed_usernames": ["alice", "bob", "tips", "donations"],
-"require_valid_username": true
-```
-
-When enabled, only usernames in the `allowed_usernames` list will be accepted. Matching is case-insensitive (e.g., `Alice` = `alice`). All payments still go to your single LND wallet regardless of username.
 
 ## Configuration Reference (config.json)
 
@@ -507,9 +483,6 @@ When enabled, only usernames in the `allowed_usernames` list will be accepted. M
 
 ## Usage
 
-### Lightning Address Format
-
-```
 ### Lightning Address Format
 
 Once configured, users can send payments to:
