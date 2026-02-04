@@ -482,12 +482,12 @@ class Handler(BaseHTTPRequestHandler):
                 callback = f"https://{DOMAIN}/lnurlp/callback"
 
                 body = {
-                    "tag": "payRequest",
                     "callback": callback,
-                    "metadata": json.dumps([["text/plain", f"Payment to {username}@{DOMAIN}"]]),
-                    "minSendable": MIN_SENDABLE,
                     "maxSendable": MAX_SENDABLE,
-                    "commentAllowed": COMMENT_ALLOWED
+                    "minSendable": MIN_SENDABLE,
+                    "metadata": json.dumps([["text/plain", f"Payment to {username}@{DOMAIN}"]]),
+                    "commentAllowed": COMMENT_ALLOWED,
+                    "tag": "payRequest"
                 }
                 
                 # Only include allowsNostr if true (optional field)
