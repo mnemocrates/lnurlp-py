@@ -143,6 +143,29 @@ def validate_config(cfg):
         nostr_identities = cfg.get("nostr", {}).get("identities", {})
         if not isinstance(nostr_identities, dict):
             errors.append("nostr.identities must be a dictionary")
+        else:
+            # Validate public keys are in hex format (64 hex chars)
+            for username, pubkey in nostr_identities.items():
+                if not isinstance(pubkey, str):
+                    errors.append(f"nostr.identities.{username}: public key must be a string")
+                elif len(pubkey) != 64:
+                    errors.append(f"nostr.identities.{username}: public key must be 64 characters (hex format), got {len(pubkey)}")
+                elif not re.match(r'^[0-9a-fA-F]{64}$', pubkey):
+                    if pubkey.startswith("npub1"):
+                        errors.append(f"nostr.identities.{username}: npub format not supported. Use hex format (64-char hex string)")
+                    else:
+                        errors.append(f"nostr.identities.{username}: public key must be hexadecimal (0-9, a-f)")
+        
+        # Validate default_pubkey if provided
+        default_pubkey = cfg.get("nostr", {}).get("default_pubkey", "")
+        if default_pubkey:
+            if len(default_pubkey) != 64:
+                errors.append(f"nostr.default_pubkey: must be 64 characters (hex format), got {len(default_pubkey)}")
+            elif not re.match(r'^[0-9a-fA-F]{64}$', default_pubkey):
+                if default_pubkey.startswith("npub1"):
+                    errors.append("nostr.default_pubkey: npub format not supported. Use hex format (64-char hex string)")
+                else:
+                    errors.append("nostr.default_pubkey: must be hexadecimal (0-9, a-f)")
         
         nostr_relays = cfg.get("nostr", {}).get("relays", [])
         if not isinstance(nostr_relays, list):
@@ -539,8 +562,12 @@ class Handler(BaseHTTPRequestHandler):
                 # Build response according to NIP-05
                 response = {"names": {}, "relays": {}}
                 
-                # Filter out the "comment" key from identities
-                valid_identities = {k: v for k, v in NOSTR_IDENTITIES.items() if k != "comment"}
+                # Filter to only valid hex pubkeys (64 hex chars)
+                # This provides defense-in-depth in case validation was bypassed
+                valid_identities = {
+                    k: v for k, v in NOSTR_IDENTITIES.items() 
+                    if isinstance(v, str) and len(v) == 64 and re.match(r'^[0-9a-fA-F]{64}$', v)
+                }
                 
                 if name:
                     # Specific name requested
@@ -594,8 +621,11 @@ class Handler(BaseHTTPRequestHandler):
                     
                     # NIP-57: Include nostr pubkey if configured for this user
                     if NOSTR_ENABLED:
-                        # Filter out the "comment" key from identities
-                        valid_identities = {k: v for k, v in NOSTR_IDENTITIES.items() if k != "comment"}
+                        # Filter to only valid hex pubkeys (64 hex chars)
+                        valid_identities = {
+                            k: v for k, v in NOSTR_IDENTITIES.items() 
+                            if isinstance(v, str) and len(v) == 64 and re.match(r'^[0-9a-fA-F]{64}$', v)
+                        }
                         
                         if username in valid_identities:
                             body["nostr"] = valid_identities[username]

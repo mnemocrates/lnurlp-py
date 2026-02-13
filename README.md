@@ -471,8 +471,8 @@ The server uses a JSON configuration file with the following structure:
   "nostr": {
     "enabled": true,
     "identities": {
-      "alice": "npub1alice...",
-      "bob": "npub1bob..."
+      "alice": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+      "bob": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
     },
     "relays": [
       "wss://relay.damus.io",
@@ -546,9 +546,9 @@ lncli getinfo | grep "uris"
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `enabled` | boolean | Enable Nostr protocol integration (NIP-05, NIP-57, NIP-65) |
-| `identities` | object | Map usernames to Nostr public keys (hex or npub format) |
+| `identities` | object | Map usernames to Nostr public keys (**hex format only**, 64 chars) |
 | `relays` | array | List of Nostr relay URLs (must start with `wss://`) |
-| `default_pubkey` | string | Default public key for users not in identities map |
+| `default_pubkey` | string | Default public key for users not in identities map (hex format) |
 | `zap_endpoint_enabled` | boolean | Allow Lightning Zaps (NIP-57) through this server |
 
 **Important**: `max_sendable` values above 10 million sats (10,000,000,000 millisats) will trigger a warning during startup as they may expose your node to liquidity issues. Ensure your channels can handle the maximum amounts you configure.
@@ -583,8 +583,8 @@ When enabled, only usernames in the `allowed_usernames` list will be accepted. M
 "nostr": {
   "enabled": true,
   "identities": {
-    "alice": "npub1alice1234567890abcdefghijklmnopqrstuvwxyz",
-    "bob": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+    "alice": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+    "bob": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
   },
   "relays": [
     "wss://relay.damus.io",
@@ -596,10 +596,18 @@ When enabled, only usernames in the `allowed_usernames` list will be accepted. M
 ```
 
 **Notes:**
-- Public keys can be in hex format (64 chars) or npub format (bech32)
+- Public keys **must be in hex format** (64-character lowercase hex string)
+- NIP-05 specification requires hex format, not npub/bech32 encoding
+- To convert npub to hex: use a Nostr key converter tool or `nak decode <npub>`
 - Relay URLs must start with `wss://` (secure WebSocket)
 - When `zap_endpoint_enabled` is false, regular LNURL payments still work but Zaps are rejected
 - The `identities` object maps Lightning Address usernames to Nostr identities
+
+**Finding your Nostr public key in hex format:**
+- From npub: Use [nostr.band](https://nostr.band) or similar tools to convert npub to hex
+- From Nostr client: Most clients show your public key in Settings/Profile
+- Using nak CLI: `nak decode npub1...` outputs the hex format
+- Your hex pubkey is the same across all Nostr applications
 
 ## Usage
 

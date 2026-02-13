@@ -29,8 +29,8 @@
   "nostr": {
     "enabled": true,
     "identities": {
-      "comment": "Map usernames to nostr public keys (hex format)",
-      "example_user": "npub1examplekeyhere1234567890abcdefghijklmnopqrstuvwxyz"
+      "alice": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+      "bob": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
     },
     "relays": [
       "wss://relay.damus.io",
