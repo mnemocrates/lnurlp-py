@@ -975,12 +975,26 @@ The server implements built-in rate limiting (100 requests per 60 seconds per IP
 
 **For additional protection**, configure rate limiting in nginx as well:
 
+**Step 1: Define rate limit zones in the http block**
+
+These directives **must** be placed in the `http` block, not in a `server` block. Add them to either:
+- `/etc/nginx/nginx.conf` inside the `http { }` block, or
+- A separate file like `/etc/nginx/conf.d/limits.conf` (recommended for organization)
+
 ```nginx
-# Add to nginx server block for defense-in-depth
+# /etc/nginx/conf.d/limits.conf
+# Define rate limit zones for LNURL-pay endpoints
 limit_req_zone $binary_remote_addr zone=lnurlp_meta:10m rate=30r/s;
 limit_req_zone $binary_remote_addr zone=lnurlp_callback:10m rate=10r/s;
 limit_req_zone $binary_remote_addr zone=lnurlp_nostr:10m rate=30r/s;
+```
 
+**Step 2: Apply rate limits in your server block**
+
+Add these `limit_req` directives to the location blocks in your server configuration:
+
+```nginx
+# In /etc/nginx/sites-available/lnurlp (inside server block)
 location /.well-known/lnurlp/ {
     limit_req zone=lnurlp_meta burst=50 nodelay;
     limit_req_status 429;
@@ -999,6 +1013,15 @@ location /.well-known/nostr.json {
     limit_req_status 429;
     # ... rest of config
 }
+```
+
+**After making changes:**
+```bash
+# Test configuration
+sudo nginx -t
+
+# Reload nginx
+sudo systemctl reload nginx
 ```
 
 The combination of application-level and nginx-level rate limiting provides defense-in-depth protection.
