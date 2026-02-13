@@ -5,6 +5,7 @@ A lightweight, self-hosted LNURL-pay server implementation in Python that connec
 ## Features
 
 - ✅ **LNURL-pay Protocol Compliant** - Full implementation of LUD-06 and LUD-12
+- ✅ **Nostr Integration** - Full support for NIP-05, NIP-57 (Zaps), and NIP-65 (Relay Lists)
 - ✅ **Tor Support** - Securely connects to LND nodes via onion services
 - ✅ **Input Validation** - Validates amounts, comments, and usernames
 - ✅ **Error Handling** - Comprehensive error handling for LND connection failures
@@ -337,7 +338,70 @@ server {
         add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
         add_header Access-Control-Allow-Headers "Content-Type";
     }
+
+    # NIP-05 Nostr identifier endpoint (optional, only if Nostr enabled)
+    location /.well-known/nostr.json {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS headers (required for Nostr clients)
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS";
+        add_header Access-Control-Allow-Headers "Content-Type";
+    }
+}
 ```
+
+**Important notes about the nginx configuration:**
+
+**LNURL endpoints** (`/.well-known/lnurlp/` and `/lnurlp/callback`):
+- Required for LNURL-pay functionality
+- CORS headers are optional but recommended for web wallet compatibility
+
+**Nostr endpoint** (`/.well-known/nostr.json`):
+- **Only required if** `nostr.enabled: true` in your `config.json`
+- If you're not using Nostr features, you can omit this location block
+- CORS headers are **mandatory** (not optional) - Nostr clients require cross-origin access
+- Enables NIP-05 verification for addresses like `alice@yourdomain.com`
+
+### Step 3: Enable the Site
+
+```bash
+# Create symbolic link to enable the site
+sudo ln -s /etc/nginx/sites-available/lnurlp /etc/nginx/sites-enabled/
+
+# Test nginx configuration for syntax errors
+sudo nginx -t
+
+# If test passes, reload nginx
+sudo systemctl reload nginx
+```
+
+### Step 4: Verify nginx Configuration
+
+```bash
+# Test LNURL metadata endpoint
+curl https://yourdomain.com/.well-known/lnurlp/test
+
+# Test LNURL callback endpoint
+curl "https://yourdomain.com/lnurlp/callback?amount=5000"
+
+# Test Nostr endpoint (only if Nostr is enabled in config.json)
+curl https://yourdomain.com/.well-known/nostr.json
+
+# Or test with a specific name
+curl "https://yourdomain.com/.well-known/nostr.json?name=alice"
+```
+
+Expected responses:
+- LNURL metadata: JSON with `callback`, `minSendable`, `maxSendable`, etc.
+- LNURL callback: JSON with `pr` (Lightning invoice) or error message
+- Nostr endpoint: JSON with `names` and `relays` objects
+
+## Configuration Reference (config.json)
 
 #### LND Settings
 
@@ -400,9 +464,23 @@ The server uses a JSON configuration file with the following structure:
     "min_sendable": 1000,
     "max_sendable": 100000000,
     "comment_allowed": 200,
-    "allows_nostr": false,
+    "allows_nostr": true,
     "allowed_usernames": [],
     "require_valid_username": false
+  },
+  "nostr": {
+    "enabled": true,
+    "identities": {
+      "alice": "npub1alice...",
+      "bob": "npub1bob..."
+    },
+    "relays": [
+      "wss://relay.damus.io",
+      "wss://relay.nostr.band",
+      "wss://nos.lol"
+    ],
+    "default_pubkey": "",
+    "zap_endpoint_enabled": true
   }
 }
 ```
@@ -459,9 +537,19 @@ lncli getinfo | grep "uris"
 | `min_sendable` | integer | Minimum payment amount in millisatoshis (1000 = 1 sat) |
 | `max_sendable` | integer | Maximum payment amount in millisatoshis (100000000 = 100,000 sats) |
 | `comment_allowed` | integer | Maximum comment length in characters (0-280, default: 200) |
-| `allows_nostr` | boolean | Enable Nostr NIP-57 support (currently not implemented) |
+| `allows_nostr` | boolean | Enable Nostr protocol support (NIP-57 zaps) |
 | `allowed_usernames` | array | Optional list of permitted usernames (empty = allow all) |
 | `require_valid_username` | boolean | Enforce username whitelist (requires `allowed_usernames` to be set) |
+
+#### Nostr Settings
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enabled` | boolean | Enable Nostr protocol integration (NIP-05, NIP-57, NIP-65) |
+| `identities` | object | Map usernames to Nostr public keys (hex or npub format) |
+| `relays` | array | List of Nostr relay URLs (must start with `wss://`) |
+| `default_pubkey` | string | Default public key for users not in identities map |
+| `zap_endpoint_enabled` | boolean | Allow Lightning Zaps (NIP-57) through this server |
 
 **Important**: `max_sendable` values above 10 million sats (10,000,000,000 millisats) will trigger a warning during startup as they may expose your node to liquidity issues. Ensure your channels can handle the maximum amounts you configure.
 
@@ -480,6 +568,38 @@ lncli getinfo | grep "uris"
 ```
 
 When enabled, only usernames in the `allowed_usernames` list will be accepted. Matching is case-insensitive (e.g., `Alice` = `alice`). All payments still go to your single LND wallet regardless of username.
+
+**Nostr Configuration Examples:**
+
+**Disable Nostr completely:**
+```json
+"nostr": {
+  "enabled": false
+}
+```
+
+**Enable Nostr with specific user mappings:**
+```json
+"nostr": {
+  "enabled": true,
+  "identities": {
+    "alice": "npub1alice1234567890abcdefghijklmnopqrstuvwxyz",
+    "bob": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+  },
+  "relays": [
+    "wss://relay.damus.io",
+    "wss://relay.nostr.band"
+  ],
+  "default_pubkey": "",
+  "zap_endpoint_enabled": true
+}
+```
+
+**Notes:**
+- Public keys can be in hex format (64 chars) or npub format (bech32)
+- Relay URLs must start with `wss://` (secure WebSocket)
+- When `zap_endpoint_enabled` is false, regular LNURL payments still work but Zaps are rejected
+- The `identities` object maps Lightning Address usernames to Nostr identities
 
 ## Usage
 
@@ -530,6 +650,71 @@ Expected response:
 ```
 
 The `pr` field contains a Lightning invoice that can be paid by any Lightning wallet.
+
+### Nostr Integration
+
+When Nostr support is enabled, the server provides additional functionality:
+
+#### NIP-05: Nostr Identifier Verification
+
+Users can verify their Nostr identity through your domain:
+
+```bash
+curl "https://yourdomain.com/.well-known/nostr.json?name=alice"
+```
+
+Response:
+```json
+{
+  "names": {
+    "alice": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+  },
+  "relays": {
+    "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d": [
+      "wss://relay.damus.io",
+      "wss://relay.nostr.band"
+    ]
+  }
+}
+```
+
+This allows Nostr users to display verified identities like `alice@yourdomain.com` in their profiles.
+
+#### NIP-57: Lightning Zaps
+
+Nostr clients can send "Zaps" (social Lightning tips) through your LNURL endpoint. The server:
+- Validates zap request events (kind 9734)
+- Creates invoices with `description_hash` for proper zap receipt verification
+- Returns success messages to notify users
+
+Zaps appear in Nostr clients as public tips with social context.
+
+#### NIP-65: Relay List Metadata
+
+The LNURL metadata endpoint automatically includes:
+- `nostr`: The recipient's public key (from `identities` mapping)
+- `nostrRelays`: Array of relay URLs where the recipient can be reached
+
+This helps Nostr clients publish zap receipts to the correct relays.
+
+**Example metadata response with Nostr:**
+```json
+{
+  "callback": "https://yourdomain.com/lnurlp/callback",
+  "maxSendable": 100000000,
+  "minSendable": 1000,
+  "metadata": "[[\"text/plain\",\"Payment to alice@yourdomain.com\"]]",
+  "commentAllowed": 200,
+  "tag": "payRequest",
+  "allowsNostr": true,
+  "nostr": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+  "nostrRelays": [
+    "wss://relay.damus.io",
+    "wss://relay.nostr.band",
+    "wss://nos.lol"
+  ]
+}
+```
 
 ### Wallet Support
 
@@ -786,6 +971,7 @@ The server implements built-in rate limiting (100 requests per 60 seconds per IP
 # Add to nginx server block for defense-in-depth
 limit_req_zone $binary_remote_addr zone=lnurlp_meta:10m rate=30r/s;
 limit_req_zone $binary_remote_addr zone=lnurlp_callback:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=lnurlp_nostr:10m rate=30r/s;
 
 location /.well-known/lnurlp/ {
     limit_req zone=lnurlp_meta burst=50 nodelay;
@@ -795,6 +981,13 @@ location /.well-known/lnurlp/ {
 
 location /lnurlp/callback {
     limit_req zone=lnurlp_callback burst=20 nodelay;
+    limit_req_status 429;
+    # ... rest of config
+}
+
+# Optional: Add rate limiting for Nostr endpoint if enabled
+location /.well-known/nostr.json {
+    limit_req zone=lnurlp_nostr burst=50 nodelay;
     limit_req_status 429;
     # ... rest of config
 }

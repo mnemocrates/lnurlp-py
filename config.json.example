@@ -22,8 +22,22 @@
     "min_sendable": 1000,
     "max_sendable": 100000000,
     "comment_allowed": 200,
-    "allows_nostr": false,
+    "allows_nostr": true,
     "allowed_usernames": [],
     "require_valid_username": false
+  },
+  "nostr": {
+    "enabled": true,
+    "identities": {
+      "comment": "Map usernames to nostr public keys (hex format)",
+      "example_user": "npub1examplekeyhere1234567890abcdefghijklmnopqrstuvwxyz"
+    },
+    "relays": [
+      "wss://relay.damus.io",
+      "wss://relay.nostr.band",
+      "wss://nos.lol"
+    ],
+    "default_pubkey": "",
+    "zap_endpoint_enabled": true
   }
 }

@@ -138,6 +138,20 @@ def validate_config(cfg):
     if not cfg.get("lnurlp", {}).get("domain"):
         errors.append("lnurlp.domain is required")
     
+    # Validate Nostr config if enabled
+    if cfg.get("nostr", {}).get("enabled", False):
+        nostr_identities = cfg.get("nostr", {}).get("identities", {})
+        if not isinstance(nostr_identities, dict):
+            errors.append("nostr.identities must be a dictionary")
+        
+        nostr_relays = cfg.get("nostr", {}).get("relays", [])
+        if not isinstance(nostr_relays, list):
+            errors.append("nostr.relays must be a list")
+        else:
+            for relay in nostr_relays:
+                if not isinstance(relay, str) or not relay.startswith("wss://"):
+                    errors.append(f"Invalid relay URL: {relay}. Must start with wss://")
+    
     return errors
 
 validation_errors = validate_config(config)
@@ -179,6 +193,12 @@ VERIFY_SSL = config["lnd"].get("verify_ssl", False)
 RATE_LIMIT_FILE = config["server"].get("rate_limit_file", "rate_limits.json")
 STATS_FILE = config["server"].get("stats_file", "stats.json")
 STATS_SAVE_INTERVAL = config["server"].get("stats_save_interval", 300)
+# Nostr configuration
+NOSTR_ENABLED = config.get("nostr", {}).get("enabled", False)
+NOSTR_IDENTITIES = config.get("nostr", {}).get("identities", {})
+NOSTR_RELAYS = config.get("nostr", {}).get("relays", [])
+NOSTR_DEFAULT_PUBKEY = config.get("nostr", {}).get("default_pubkey", "")
+NOSTR_ZAP_ENDPOINT_ENABLED = config.get("nostr", {}).get("zap_endpoint_enabled", True)
 # Cache macaroon at startup
 MACAROON_HEX = None
 
@@ -296,6 +316,45 @@ def sanitize_comment(comment):
             return None
     
     return comment
+
+def validate_zap_request(nostr_event_str):
+    """Validate NIP-57 zap request event
+    Returns (valid, event_dict) tuple
+    """
+    if not nostr_event_str:
+        return False, None
+    
+    try:
+        event = json.loads(nostr_event_str)
+        
+        # Basic validation of nostr event structure
+        required_fields = ['id', 'pubkey', 'created_at', 'kind', 'tags', 'content', 'sig']
+        if not all(field in event for field in required_fields):
+            logger.warning("Zap request missing required fields")
+            return False, None
+        
+        # Validate it's a kind 9734 event (zap request)
+        if event['kind'] != 9734:
+            logger.warning(f"Invalid zap request kind: {event['kind']}, expected 9734")
+            return False, None
+        
+        # Basic type checks
+        if not isinstance(event['tags'], list):
+            return False, None
+        if not isinstance(event['pubkey'], str) or len(event['pubkey']) != 64:
+            return False, None
+        if not isinstance(event['sig'], str) or len(event['sig']) != 128:
+            return False, None
+        
+        logger.debug(f"Valid zap request from pubkey: {event['pubkey'][:8]}...")
+        return True, event
+        
+    except json.JSONDecodeError:
+        logger.warning("Invalid JSON in nostr event")
+        return False, None
+    except Exception as e:
+        logger.warning(f"Error validating zap request: {e}")
+        return False, None
 
 def check_rate_limit(ip_address):
     """Check if IP address has exceeded rate limit"""
@@ -466,6 +525,45 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(health_data)
                 return
 
+            # NIP-05: Nostr address verification endpoint
+            if parsed.path == "/.well-known/nostr.json":
+                if not NOSTR_ENABLED:
+                    logger.warning(f"[{self.request_id}] Nostr not enabled")
+                    self.respond_error("Nostr support not enabled")
+                    return
+                
+                # Parse query parameters for name lookup
+                qs = urllib.parse.parse_qs(parsed.query)
+                name = qs.get("name", [None])[0]
+                
+                # Build response according to NIP-05
+                response = {"names": {}, "relays": {}}
+                
+                # Filter out the "comment" key from identities
+                valid_identities = {k: v for k, v in NOSTR_IDENTITIES.items() if k != "comment"}
+                
+                if name:
+                    # Specific name requested
+                    if name in valid_identities:
+                        pubkey = valid_identities[name]
+                        response["names"][name] = pubkey
+                        if NOSTR_RELAYS:
+                            response["relays"][pubkey] = NOSTR_RELAYS
+                    else:
+                        # Return empty dict for unknown names (per NIP-05)
+                        pass
+                else:
+                    # No specific name requested - return all names
+                    response["names"] = valid_identities.copy()
+                    # Add relay info for each pubkey
+                    if NOSTR_RELAYS:
+                        for pubkey in valid_identities.values():
+                            response["relays"][pubkey] = NOSTR_RELAYS
+                
+                logger.info(f"[{self.request_id}] NIP-05 lookup for name: {name or 'all'}")
+                self.respond(response)
+                return
+
             # LNURLp metadata endpoint
             if parsed.path.startswith("/.well-known/lnurlp/"):
                 increment_stat('requests_metadata')
@@ -493,6 +591,20 @@ class Handler(BaseHTTPRequestHandler):
                 # Only include allowsNostr if true (optional field)
                 if ALLOWS_NOSTR:
                     body["allowsNostr"] = ALLOWS_NOSTR
+                    
+                    # NIP-57: Include nostr pubkey if configured for this user
+                    if NOSTR_ENABLED:
+                        # Filter out the "comment" key from identities
+                        valid_identities = {k: v for k, v in NOSTR_IDENTITIES.items() if k != "comment"}
+                        
+                        if username in valid_identities:
+                            body["nostr"] = valid_identities[username]
+                        elif NOSTR_DEFAULT_PUBKEY:
+                            body["nostr"] = NOSTR_DEFAULT_PUBKEY
+                        
+                        # NIP-65: Include relay list if configured
+                        if NOSTR_RELAYS:
+                            body["nostrRelays"] = NOSTR_RELAYS
 
                 logger.info(f"[{self.request_id}] LNURL metadata requested for user: {username}")
                 self.respond(body)
@@ -545,6 +657,32 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     comment = sanitized_comment
 
+                # Handle NIP-57 zap request
+                nostr_event = None
+                description_hash = None
+                nostr_param = qs.get("nostr", [""])[0]
+                
+                if nostr_param:
+                    if not NOSTR_ENABLED or not NOSTR_ZAP_ENDPOINT_ENABLED:
+                        logger.warning(f"[{self.request_id}] Zap request received but Nostr/Zaps not enabled")
+                        increment_stat('errors_total')
+                        self.respond_error("Nostr zaps not enabled on this server")
+                        return
+                    
+                    # Validate zap request
+                    valid, event = validate_zap_request(nostr_param)
+                    if not valid:
+                        logger.warning(f"[{self.request_id}] Invalid zap request")
+                        increment_stat('errors_total')
+                        self.respond_error("Invalid zap request")
+                        return
+                    
+                    nostr_event = event
+                    # Create description hash for the invoice (SHA256 of the zap request)
+                    import hashlib
+                    description_hash = hashlib.sha256(nostr_param.encode()).digest()
+                    logger.info(f"[{self.request_id}] Processing zap request from {event['pubkey'][:8]}...")
+
                 # Create invoice via LND
                 try:
                     logger.info(f"[{self.request_id}] Creating invoice for {amount_sat} sats")
@@ -553,14 +691,25 @@ class Handler(BaseHTTPRequestHandler):
                     if not VERIFY_SSL:
                         logger.debug(f"[{self.request_id}] SSL verification disabled for LND connection")
                     
+                    # Build invoice request
+                    invoice_request = {
+                        "value": amount_sat,
+                        "expiry": INVOICE_EXPIRY
+                    }
+                    
+                    # Add memo or description_hash depending on whether this is a zap
+                    if description_hash:
+                        # For zaps, use description_hash (base64 encoded)
+                        import base64
+                        invoice_request["description_hash"] = base64.b64encode(description_hash).decode()
+                    else:
+                        # For regular payments, use memo
+                        invoice_request["memo"] = comment
+                    
                     response = requests.post(
                         f"https://{LND_ONION}:{LND_PORT}/v1/invoices",
                         headers={"Grpc-Metadata-macaroon": MACAROON_HEX},
-                        json={
-                            "value": amount_sat,
-                            "memo": comment,
-                            "expiry": INVOICE_EXPIRY
-                        },
+                        json=invoice_request,
                         proxies={"https": TOR_PROXY},
                         verify=VERIFY_SSL,
                         timeout=30
@@ -582,7 +731,21 @@ class Handler(BaseHTTPRequestHandler):
                     
                     increment_stat('invoices_created')
                     logger.info(f"[{self.request_id}] Invoice created successfully for {amount_sat} sats")
-                    self.respond({"pr": invoice["payment_request"], "routes": []})
+                    
+                    # Build response
+                    callback_response = {
+                        "pr": invoice["payment_request"],
+                        "routes": []
+                    }
+                    
+                    # Add success action for zaps (optional but recommended)
+                    if nostr_event:
+                        callback_response["successAction"] = {
+                            "tag": "message",
+                            "message": "Zap request received! The recipient will be notified."
+                        }
+                    
+                    self.respond(callback_response)
                     
                 except requests.exceptions.Timeout:
                     logger.error(f"[{self.request_id}] LND request timed out")
